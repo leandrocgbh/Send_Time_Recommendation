@@ -85,6 +85,31 @@ class SendTimeRecommender:
 
         return hour_range.get(hra)
 
+    @staticmethod
+    def fill_empty_hour_range(self, customer_data):
+
+        """
+        Function to fill empty hour range within customer data
+
+        Input:
+        customer_data: Pandas DataFrame with customer events data
+
+        Output:
+        Pandas Series with empty data filled
+
+        """
+
+        cs_data = customer_data
+
+        hour_ranges = ['00-01', '02-03', '04-05', '06-07', '08-09', '10-11','12-13', 
+                      '14-15','16-17','18-19', '20-21','22-23']
+
+        for hr in hour_ranges:
+            if hr not in cs_data.index:
+                cs_data[hr] = 0.0
+
+        return cs_data
+
     def set_additional_columns(self, df_events_data):
 
         """
@@ -203,7 +228,7 @@ class SendTimeRecommender:
         return df_customers_wknd, df_customers_even, df_customers_odd
 
     @staticmethod
-    def format_customer_data(df_events, customer_id, weekday):
+    def format_customer_data(self, df_events, customer_id, weekday):
 
         """
         Formats customer data for a given customer_id in proportions of open e-mails for
@@ -249,7 +274,7 @@ class SendTimeRecommender:
 
         df_return = df_customers_all.loc[customer_id]
 
-        return df_return
+        return self.fill_empty_hour_range(self,df_return)
 
     @staticmethod
     def get_optimal_cluster_number(self, df_events_data):
@@ -408,7 +433,7 @@ class SendTimeRecommender:
 
         """
 
-        customer_data = self.format_customer_data(self.__df_events, customer_id, weekday)
+        customer_data = self.format_customer_data(self, self.__df_events, customer_id, weekday)
 
         if weekday in (0,2,4):
             customer_probs = self.__model_cluster_even.predict_proba(customer_data.values.reshape(1, -1))
@@ -419,6 +444,35 @@ class SendTimeRecommender:
 
 
         return customer_probs
+
+    def predict_customer_cluster_from_data(self, customer_data, weekday):
+
+        """
+        Predict Customer Cluster for a given customer_id and weekday
+        using the trained internal classifier.
+
+        Input:
+        customer_data: Pandas DataFrame with customer open events data
+        weekday: Int representing weekday (0=Monday...6=Sunday)
+
+        Output:
+        Array of probabilyties of a given customer belongs to each cluster (soft clustering approach).
+
+        """
+        customer_id = customer_data['id'].iloc[0]
+        
+        cs_data = self.format_customer_data(self, customer_data, customer_id, weekday)
+
+        if weekday in (0,2,4):
+            customer_probs = self.__model_cluster_even.predict_proba(cs_data.values.reshape(1, -1))
+        elif weekday in (1,3):
+            customer_probs = self.__model_cluster_odd.predict_proba(cs_data.values.reshape(1, -1))
+        else:
+            customer_probs = self.__model_cluster_wknd.predict_proba(cs_data.values.reshape(1, -1))
+
+
+        return customer_probs
+
 
     def get_customer_table_probs(self, customer_id, weekday, learning_rate):
 
@@ -440,6 +494,92 @@ class SendTimeRecommender:
         """
 
         customer_probs = self.predict_customer_cluster(customer_id, weekday)
+
+        prob_cluster = np.argsort(-customer_probs)[0][0]
+        next_cluster = np.argsort(-customer_probs)[0][1]
+
+        if weekday in (0,2,4):
+            filter_values = self.__df_events_even[self.__df_events_even['cluster'] == prob_cluster].values[:, :12]
+            customer_pred = self.__model_cluster_even.predict_proba(filter_values)
+            cluster_table = self.__cluster_table_even
+        elif weekday in (1,3):
+            filter_values = self.__df_events_odd[self.__df_events_odd['cluster'] == prob_cluster].values[:, :12]
+            customer_pred = self.__model_cluster_odd.predict_proba(filter_values)
+            cluster_table = self.__cluster_table_odd
+        else:
+            filter_values = self.__df_events_wknd[self.__df_events_wknd['cluster'] == prob_cluster].values[:, :12]
+            customer_pred = self.__model_cluster_wknd.predict_proba(filter_values)
+            cluster_table = self.__cluster_table_wknd
+
+        customer_freq_table = pd.DataFrame(np.argsort(-customer_pred)[:, 1], columns=['freq'])[
+            'freq'].value_counts().to_frame()
+        next_similar_cluster = customer_freq_table.iloc[0].name
+
+        recommended_clusters = [prob_cluster, next_cluster, next_similar_cluster]
+
+        column_array = cluster_table.loc[recommended_clusters].values.argmax(axis=1)
+
+        # Creating the final probabilities table
+        probs_recommendation = []
+
+        for i in range(len(cluster_table.iloc[recommended_clusters[0]])):
+            probs_recommendation.append((i, cluster_table.iloc[recommended_clusters[0]][i]))
+
+        final_table_prob = pd.DataFrame(probs_recommendation, columns=['hour', 'prob']).set_index('hour')
+
+        # Updating the probabilities of recommended hour ranges
+        # with additional probabilities of next cluster and next similar cluster
+
+        # This is the max hour range of the prob_cluster
+        prob_cluster_index = final_table_prob['prob'].idxmax()
+
+        for i in range(3):
+
+            # Getting the index of most probable cluster hour rante to use on learning rate update
+            if recommended_clusters[i] == prob_cluster:
+                prob_cluster_index = column_array[i]
+
+            actual_value = final_table_prob.iloc[column_array[i]][0]
+            new_value = cluster_table.iloc[recommended_clusters[i]][column_array[i]]
+            
+            #It only updates the values when the new_value (value from another cluster)
+            #is greater than the actual value for customer's cluster.
+            if new_value > actual_value:
+                final_table_prob.iloc[column_array[i]] = cluster_table.iloc[recommended_clusters[i]][column_array[i]]
+
+        # Learning Rate
+        for i in range(len(final_table_prob)):
+            # If this is the most probable cluster
+            if i == prob_cluster_index:
+                final_table_prob['prob'].iloc[i] *= (1 - learning_rate)
+            else:
+                final_table_prob['prob'].iloc[i] *= learning_rate
+
+        final_probs = list(final_table_prob['prob'] / final_table_prob['prob'].sum())
+
+        return final_probs, final_table_prob, cluster_table
+
+
+    def get_customer_table_probs_from_data(self, customer_data, weekday, learning_rate):
+
+        """
+        Returns customer probabilities tables of opening e-mails in each hour-range.
+
+        Input:
+        customer_data: Pandas Dataframe with customer open events data
+        weekday: Int representing weekday (0=Monday...6=Sunday)
+        learning_rate: Float value used as weight to exploration x exploitation. This
+        parameter controls how much is desired to model learn (explore new time slots)
+        or use the known data (exploit).
+
+        Output:
+        final_probs: Customer's array of ajusted probabilities of open e-mails for each hour_range
+        final_table_prob: final probs in Pandas DataFrame format.
+        cluster_table: The cluster table used to ajust probabilities of the given customer.
+
+        """
+        
+        customer_probs = self.predict_customer_cluster_from_data(customer_data, weekday)
 
         prob_cluster = np.argsort(-customer_probs)[0][0]
         next_cluster = np.argsort(-customer_probs)[0][1]
@@ -530,6 +670,37 @@ class SendTimeRecommender:
         weekday = get_weekday(target_date, strformat='%Y-%m-%d')
 
         final_probs, final_table_prob, cluster_table = self.get_customer_table_probs(customer_id, weekday, learning_rate)
+
+        hour_range_recommended = np.random.choice(final_table_prob.index, p=final_probs)
+
+        return hour_range_recommended, cluster_table.columns[hour_range_recommended]
+
+    
+    def recommend_send_time_customer(self, customer_data, target_date, learning_rate):
+
+        """
+        Recommends a hour-range for a given customer and target date,
+        using a specific learning_rate.
+
+        Input:
+        customer_data: Pandas Data Frame with customer open events data
+
+        target_date: The desired date for hour-range recommendation. This parameter
+                     is used to map the recommendation classifier (weekend and regular day)
+
+        learning_rate: Float value used as weight to exploration x exploitation. This
+                       parameter controls how much is desired to model learn
+                       (explore new time slots) or use the known data (exploit).
+        
+
+        Output:
+        Recommended hour-range index and description.
+
+        """
+
+        weekday = get_weekday(target_date, strformat='%Y-%m-%d')
+
+        final_probs, final_table_prob, cluster_table = self.get_customer_table_probs_from_data(customer_data, weekday, learning_rate)
 
         hour_range_recommended = np.random.choice(final_table_prob.index, p=final_probs)
 
