@@ -108,7 +108,7 @@ class SendTimeRecommender:
             if hr not in cs_data.index:
                 cs_data[hr] = 0.0
 
-        return cs_data
+        return cs_data.sort_index()
 
     def set_additional_columns(self, df_events_data):
 
@@ -225,7 +225,7 @@ class SendTimeRecommender:
                                                         fill_value=0.0)
 
 
-        return df_customers_wknd, df_customers_even, df_customers_odd
+        return df_customers_wknd,df_customers_even,df_customers_odd
 
     @staticmethod
     def format_customer_data(self, df_events, customer_id, weekday):
