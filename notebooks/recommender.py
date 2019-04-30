@@ -58,7 +58,7 @@ class SendTimeRecommender:
     """
     Class SendTimeRecommender:
     
-    Student: Leandro Correa Goncalves
+    Leandro Correa Goncalves
 
     This is the Send Time Recommender class that is proposed to recommend 
     optimal e-mail send times according to customer's history data
@@ -84,6 +84,50 @@ class SendTimeRecommender:
                     '18': '18-19', '19': '18-19', '20': '20-21', '21': '20-21', '22': '22-23', '23': '22-23'}
 
         return hour_range.get(hra)
+
+    @staticmethod
+    def have_customer_data(self, customer_id, weekday):
+
+        """
+        Function to test whether there are data about a given customer id
+
+        Input:
+        customer_id: String with customer identification
+        weekday: Int representing the weekday (0=Monday..6=Sunday)
+
+        Output:
+        Bool with the answer about customer data
+
+        """
+        if weekday in (0,2,4):
+            return  customer_id in self.__df_events_even.index
+        elif weekday in (1,3):
+            return customer_id in self.__df_events_odd.index
+        else:
+            return customer_id in self.__df_events_wknd.index
+
+    @staticmethod
+    def get_most_frequent_from_day(self, weekday):
+
+        """
+        Function to get the most frequent hour range for a given weekday
+
+        Input:
+        weekday: Int representing the weekday (0=Monday..6=Sunday)
+
+        Output:
+        String with the most frequent hour-range
+
+        """
+        events_aux = self.__df_events
+
+        events_aux = events_aux[events_aux['flg_open'] == 1]
+        events_aux = events_aux[events_aux['weekday']== weekday]
+        events_aux = events_aux[['flg_open', 'hour_range']].groupby('hour_range').sum()
+        recommended_hour_range = events_aux.sort_values(by='flg_open', ascending=False).iloc[0].name
+
+        return -1, recommended_hour_range
+
 
     @staticmethod
     def fill_empty_hour_range(self, customer_data):
@@ -271,7 +315,7 @@ class SendTimeRecommender:
 
         df_customers_all = df_customers_all.pivot_table(index='id', columns='hour_range', values='open_prop',
                                                         fill_value=0.0)
-
+        
         df_return = df_customers_all.loc[customer_id]
 
         return self.fill_empty_hour_range(self,df_return)
@@ -460,6 +504,7 @@ class SendTimeRecommender:
 
         """
         customer_id = customer_data['id'].iloc[0]
+        
         
         cs_data = self.format_customer_data(self, customer_data, customer_id, weekday)
 
@@ -669,13 +714,21 @@ class SendTimeRecommender:
 
         weekday = get_weekday(target_date, strformat='%Y-%m-%d')
 
-        final_probs, final_table_prob, cluster_table = self.get_customer_table_probs(customer_id, weekday, learning_rate)
+        #Testing whether there are data about a given customer, otherwise
+        #recommend the most frequent open time for a weekday
 
-        hour_range_recommended = np.random.choice(final_table_prob.index, p=final_probs)
+        if self.have_customer_data(self, customer_id, weekday):
 
-        return hour_range_recommended, cluster_table.columns[hour_range_recommended]
+            final_probs, final_table_prob, cluster_table = self.get_customer_table_probs(customer_id, weekday, learning_rate)
 
-    
+            hour_range_recommended = np.random.choice(final_table_prob.index, p=final_probs)
+
+            return hour_range_recommended, cluster_table.columns[hour_range_recommended]
+        else:
+
+            return self.get_most_frequent_from_day(self, weekday)
+
+
     def recommend_send_time_customer(self, customer_data, target_date, learning_rate):
 
         """
@@ -848,7 +901,7 @@ class SendTimeRecommender:
         """
         Returns the most probable hour range according to a given customer_id and weekday
         It gets the probability table of the cluster of the parameter customer_id
-        and suggest a hour range
+        and suggest an hour range
 
         Input:
         customer_id: String with the customer_id
