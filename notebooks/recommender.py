@@ -122,11 +122,26 @@ class SendTimeRecommender:
         events_aux = self.__df_events
 
         events_aux = events_aux[events_aux['flg_open'] == 1]
+        
         events_aux = events_aux[events_aux['weekday']== weekday]
-        events_aux = events_aux[['flg_open', 'hour_range']].groupby('hour_range').sum()
-        recommended_hour_range = events_aux.sort_values(by='flg_open', ascending=False).iloc[0].name
 
-        return -1, recommended_hour_range
+        #If there is no data about the given weekday to get the most frequent time
+        #return the most frequent for all weekdays.
+
+        if len(events_aux) > 0:
+            events_aux = events_aux[['flg_open', 'hour_range']].groupby('hour_range').sum()
+            recommended_hour_range = events_aux.sort_values(by='flg_open', ascending=False).iloc[0].name
+            return -1, recommended_hour_range
+        else:
+            events_aux = self.__df_events
+            events_aux = events_aux[events_aux['flg_open'] == 1]
+
+            if len(events_aux) > 0:
+                events_aux = events_aux[['flg_open', 'hour_range']].groupby('hour_range').sum()
+                recommended_hour_range = events_aux.sort_values(by='flg_open', ascending=False).iloc[0].name
+                return -1, recommended_hour_range
+            else:
+                return -1, '10-11'
 
 
     @staticmethod
@@ -580,7 +595,7 @@ class SendTimeRecommender:
 
         for i in range(3):
 
-            # Getting the index of most probable cluster hour rante to use on learning rate update
+            # Getting the index of most probable cluster hour range to use on learning rate update
             if recommended_clusters[i] == prob_cluster:
                 prob_cluster_index = column_array[i]
 
@@ -603,6 +618,62 @@ class SendTimeRecommender:
         final_probs = list(final_table_prob['prob'] / final_table_prob['prob'].sum())
 
         return final_probs, final_table_prob, cluster_table
+
+
+    def get_customer_suggestions(self, customer_id, weekday, learning_rate):
+
+        """
+        Returns customer probabilities tables of opening e-mails in each hour-range.
+
+        Input:
+        customer_id: String with customer id that needs to be predicted
+        weekday: Int representing weekday (0=Monday...6=Sunday)
+        learning_rate: Float value used as weight to exploration x exploitation. This
+        parameter controls how much is desired to model learn (explore new time slots)
+        or use the known data (exploit).
+
+        Output:
+        final_probs: Customer's array of ajusted probabilities of open e-mails for each hour_range
+        final_table_prob: final probs in Pandas DataFrame format.
+        cluster_table: The cluster table used to ajust probabilities of the given customer.
+
+        """
+
+        if self.have_customer_data(self, customer_id, weekday):
+
+            customer_probs = self.predict_customer_cluster(customer_id, weekday)
+
+            prob_cluster = np.argsort(-customer_probs)[0][0]
+            next_cluster = np.argsort(-customer_probs)[0][1]
+
+            if weekday in (0,2,4):
+                filter_values = self.__df_events_even[self.__df_events_even['cluster'] == prob_cluster].values[:, :12]
+                customer_pred = self.__model_cluster_even.predict_proba(filter_values)
+                cluster_table = self.__cluster_table_even
+            elif weekday in (1,3):
+                filter_values = self.__df_events_odd[self.__df_events_odd['cluster'] == prob_cluster].values[:, :12]
+                customer_pred = self.__model_cluster_odd.predict_proba(filter_values)
+                cluster_table = self.__cluster_table_odd
+            else:
+                filter_values = self.__df_events_wknd[self.__df_events_wknd['cluster'] == prob_cluster].values[:, :12]
+                customer_pred = self.__model_cluster_wknd.predict_proba(filter_values)
+                cluster_table = self.__cluster_table_wknd
+
+            customer_freq_table = pd.DataFrame(np.argsort(-customer_pred)[:, 1], columns=['freq'])[
+                'freq'].value_counts().to_frame()
+            next_similar_cluster = customer_freq_table.iloc[0].name
+
+            recommended_clusters = [prob_cluster, next_cluster, next_similar_cluster]
+
+            column_array = cluster_table.loc[recommended_clusters].values.argmax(axis=1)
+
+            return cluster_table.loc[recommended_clusters].columns[column_array].values
+
+        else:
+
+            return [self.get_most_frequent_from_day(self, weekday)[1]]
+
+        
 
 
     def get_customer_table_probs_from_data(self, customer_data, weekday, learning_rate):
