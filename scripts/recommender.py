@@ -451,21 +451,21 @@ class SendTimeRecommender:
 
         if len(self.__df_events_wknd) > 0:
             #self.__n_cluster_wknd = self.get_optimal_cluster_number(self, self.__df_events_wknd)
-            self.__n_cluster_wknd = 23
+            self.__n_cluster_wknd = 12
             self.__model_cluster_wknd = self.get_cluster_classifier(self, self.__df_events_wknd, self.__n_cluster_wknd)
             self.__df_events_wknd['cluster'] = self.get_cluster_data(self, self.__model_cluster_wknd, self.__df_events_wknd)
             self.__cluster_table_wknd = self.get_cluster_table(self.__df_events_wknd)
 
         if len(self.__df_events_even) > 0:
             #self.__n_cluster_even = self.get_optimal_cluster_number(self, self.__df_events_even)
-            self.__n_cluster_even = 20
+            self.__n_cluster_even = 18
             self.__model_cluster_even = self.get_cluster_classifier(self, self.__df_events_even, self.__n_cluster_even)
             self.__df_events_even['cluster'] = self.get_cluster_data(self, self.__model_cluster_even, self.__df_events_even)
             self.__cluster_table_even = self.get_cluster_table(self.__df_events_even)
 
         if len(self.__df_events_odd) > 0:
             #self.__n_cluster_odd = self.get_optimal_cluster_number(self, self.__df_events_odd)
-            self.__n_cluster_odd = 20
+            self.__n_cluster_odd = 18
             self.__model_cluster_odd = self.get_cluster_classifier(self, self.__df_events_odd, self.__n_cluster_odd)
             self.__df_events_odd['cluster'] = self.get_cluster_data(self, self.__model_cluster_odd, self.__df_events_odd)
             self.__cluster_table_odd = self.get_cluster_table(self.__df_events_odd)
